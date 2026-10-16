@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Josephson Junction Superconductor Simulation</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  canvas { image-rendering: pixelated; }
+  .param-label { font-size: 0.75rem; color: #9ca3af; }
+  input[type=range] { accent-color: #3b82f6; }
+  .mode-dc { color: #34d399; }
+  .mode-ac { color: #f59e0b; }
+  .equation {
+    font-family: 'Courier New', monospace;
+    font-size: 0.8rem;
+    background: #1f2937;
+    border-radius: 4px;
+    padding: 2px 6px;
+  }
+</style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen flex flex-col">
+<header class="bg-gray-800 border-b border-gray-700 px-6 py-3">
+  <h1 class="text-xl font-bold text-blue-400">⚡ Josephson Junction Superconductor Simulation</h1>
+  <p class="text-gray-400 text-xs mt-0.5">RSJ model — DC/AC Josephson effects via 4th-order Runge-Kutta integration</p>
+</header>
+
+<main class="flex flex-col lg:flex-row flex-1 gap-3 p-3">
+
+  <!-- Controls Panel -->
+  <div class="w-full lg:w-64 flex flex-col gap-3">
+
+    <!-- Parameters -->
+    <div class="bg-gray-800 rounded-xl border border-gray-700 p-4">
+      <h2 class="text-blue-300 font-bold text-sm mb-3">Parameters</h2>
+
+      <div class="space-y-4">
+        <div>
+          <div class="flex justify-between items-center mb-1">
+            <label class="param-label" for="sliderIb">Bias Current I<sub>b</sub>/I<sub>c</sub></label>
+            <span id="valIb" class="text-white text-xs font-mono font-bold">0.50</span>
+          </div>
+          <input type="range" id="sliderIb" min="0" max="2" step="0.01" value="0.5"
+                 class="w-full h-2" aria-label="Bias current normalized to critical current"
+                 oninput="updateParams()">
+          <div class="flex justify-between text-xs text-gray-500 mt-0.5">
+            <span>0 (DC)</span><span>1.0 (I<sub>c</sub>)</span><span>2.0 (AC)</span>
+          </div>
+        </div>
+
+        <div>
+          <div class="flex justify-between items-center mb-1">
+            <label class="param-label" for="sliderBeta">Damping β<sub>c</sub> (Stewart-McCumber)</label>
+            <span id="valBeta" class="text-white text-xs font-mono font-bold">1.00</span>
+          </div>
+          <input type="range" id="sliderBeta" min="0.1" max="10" step="0.1" value="1.0"
+                 class="w-full h-2" aria-label="Stewart-McCumber damping parameter beta_c"
+                 oninput="updateParams()">
+          <div class="flex justify-between text-xs text-gray-500 mt-0.5">
+            <span>0.1 (overdamped)</span><span>10 (underdamped)</span>
+          </div>
+        </div>
+
+        <div class="text-xs text-gray-400 space-y-1 border-t border-gray-700 pt-2">
+          <div>I<sub>c</sub> = <span class="text-white font-mono">1.0 μA</span></div>
+          <div>R = <span class="text-white font-mono">1.0 Ω</span></div>
+          <div>Temperature: <span class="text-white font-mono">0 K (ideal)</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Status -->
+    <div class="bg-gray-800 rounded-xl border border-gray-700 p-4">
+      <h2 class="text-blue-300 font-bold text-sm mb-3">Live Measurements</h2>
+      <div class="space-y-2 text-sm">
+        <div class="flex justify-between">
+          <span class="text-gray-400">Mode:</span>
+          <span id="modeLabel" class="font-bold text-green-400">DC Josephson</span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-gray-400">⟨V⟩ (avg):</span>
+          <span id="avgVoltage" class="font-mono text-white">0.00 μV</span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-gray-400">⟨I⟩ (avg):</span>
+          <span id="avgCurrent" class="font-mono text-white">0.00 μA</span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-gray-400">f<sub>J</sub>:</span>
+          <span id="freqJ" class="font-mono text-white">0.00 GHz</span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-gray-400">φ (phase):</span>
+          <span id="phaseVal" class="font-mono text-white">0.00 rad</span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-gray-400">I<sub>s</sub> = I<sub>c</sub>sin(φ):</span>
+          <span id="superCurrent" class="font-mono text-white">0.00 μA</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Equations -->
+    <div class="bg-gray-800 rounded-xl border border-gray-700 p-4">
+      <h2 class="text-blue-300 font-bold text-sm mb-3">RSJ Model Equations</h2>
+      <div class="space-y-2 text-xs text-gray-300">
+        <div>
+          <p class="text-gray-400 mb-1">Current balance:</p>
+          <p class="equation">I<sub>b</sub> = I<sub>c</sub>sin(φ) + V/R + C·dV/dt</p>
+        </div>
+        <div>
+          <p class="text-gray-400 mb-1">Josephson relation:</p>
+          <p class="equation">dφ/dt = (2e/ℏ)·V = (2π/Φ₀)·V</p>
+        </div>
+        <div>
+          <p class="text-gray-400 mb-1">Josephson frequency:</p>
+          <p class="equation">f<sub>J</sub> = 2eV/h = V/Φ₀</p>
+          <p class="text-gray-500 text-xs mt-0.5">Φ₀ = h/2e ≈ 2.07 mV·ps</p>
+        </div>
+        <div>
+          <p class="text-gray-400 mb-1">Stewart-McCumber:</p>
+          <p class="equation">β<sub>c</sub> = 2eI<sub>c</sub>R²C/ℏ</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="bg-gray-800 rounded-xl border border-gray-700 p-4">
+      <div class="flex gap-2">
+        <button id="btnRun" onclick="toggleRun()" class="flex-1 bg-blue-700 hover:bg-blue-600 text-white py-2 rounded-lg text-sm font-semibold transition-colors" aria-label="Run or pause simulation">
+          ⏸ Pause
+        </button>
+        <button onclick="resetSim()" class="flex-1 bg-gray-600 hover:bg-gray-500 text-white py-2 rounded-lg text-sm font-semibold transition-colors" aria-label="Reset simulation">
+          ↺ Reset
+        </button>
+      </div>
+      <div class="mt-2 flex gap-2">
+        <button onclick="sweepIV()" class="flex-1 bg-purple-700 hover:bg-purple-600 text-white py-1.5 rounded-lg text-xs font-semibold" aria-label="Sweep IV characteristic">
+          I-V Sweep
+        </button>
+        <button onclick="clearTraces()" class="flex-1 bg-gray-600 hover:bg-gray-500 text-white py-1.5 rounded-lg text-xs font-semibold" aria-label="Clear graph traces">
+          Clear
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Graphs Panel -->
+  <div class="flex-1 flex flex-col gap-3">
+
+    <!-- I-V Characteristic -->
+    <div class="bg-gray-800 rounded-xl border border-gray-700 p-3 flex-1">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="text-blue-300 font-bold text-sm">I-V Characteristic Curve</h2>
+        <div class="flex gap-3 text-xs">
+          <span class="flex items-center gap-1"><span class="w-3 h-1 bg-green-400 inline-block"></span>DC (supercurrent)</span>
+          <span class="flex items-center gap-1"><span class="w-3 h-1 bg-yellow-400 inline-block"></span>AC (resistive)</span>
+          <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-red-400 inline-block"></span>Operating point</span>
+        </div>
+      </div>
+      <canvas id="ivCanvas" width="760" height="240" class="w-full rounded-lg bg-gray-900" aria-label="I-V characteristic curve canvas"></canvas>
+    </div>
+
+    <!-- Phase Evolution -->
+    <div class="bg-gray-800 rounded-xl border border-gray-700 p-3 flex-1">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="text-blue-300 font-bold text-sm">Phase & Voltage Evolution φ(t), V(t)</h2>
+        <div class="flex gap-3 text-xs">
+          <span class="flex items-center gap-1"><span class="w-3 h-1 bg-blue-400 inline-block"></span>Phase φ(t)</span>
+          <span class="flex items-center gap-1"><span class="w-3 h-1 bg-orange-400 inline-block"></span>Voltage V(t)</span>
+        </div>
+      </div>
+      <canvas id="phaseCanvas" width="760" height="220" class="w-full rounded-lg bg-gray-900" aria-label="Phase and voltage time evolution canvas"></canvas>
+    </div>
+
+    <!-- Info bar -->
+    <div id="effectExplain" class="bg-gray-800 rounded-xl border border-gray-700 p-3">
+      <div class="flex items-start gap-3">
+        <div id="effectIcon" class="text-2xl">🔵</div>
+        <div>
+          <h3 id="effectTitle" class="text-green-400 font-bold text-sm">DC Josephson Effect</h3>
+          <p id="effectDesc" class="text-gray-300 text-xs mt-0.5 leading-relaxed">
+            When I_b &lt; I_c, Cooper pairs tunnel coherently through the barrier without any voltage developing.
+            The supercurrent flows with zero resistance: I_s = I_c · sin(φ) where φ is the phase difference
+            across the junction. This is the DC Josephson effect — a macroscopic quantum phenomenon.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+// Physical constants (normalized units)
+// We normalize: Ic=1, R=1, Φ0=1 (so ω_J = 2π * V in units where Φ0=1)
+// Time is in units of ℏ/(2eIcR) = RC (for β_c=1)
+
+const e = 1.602e-19;
+const hbar = 1.055e-34;
+const h = 6.626e-34;
+const phi0 = h / (2 * e); // 2.07e-15 Wb (flux quantum)
+
+// Simulation state
+let phi = 0;       // phase
+let dphi = 0;      // dφ/dt (in normalized units)
+let t = 0;         // time (normalized)
+let running = true;
+let Ib = 0.5;      // bias current / Ic
+let betaC = 1.0;   // Stewart-McCumber parameter
+let dt = 0.02;     // time step
+
+// Data buffers
+const MAX_PTS = 400;
+let phaseData = [];  // {t, phi, v}
+let ivSweepData = []; // {v, i} from sweep
+let currentDot = {v: 0, i: 0};
+
+// Canvas contexts
+let ivCtx, phaseCtx;
+
+function init() {
+  ivCtx = document.getElementById('ivCanvas').getContext('2d');
+  phaseCtx = document.getElementById('phaseCanvas').getContext('2d');
+  resizeCanvases();
+  window.addEventListener('resize', resizeCanvases);
+  // Pre-compute IV curve
+  sweepIV();
+  loop();
+}
+
+function resizeCanvases() {
+  const ivCanvas = document.getElementById('ivCanvas');
+  const phCanvas = document.getElementById('phaseCanvas');
+  const containerW = ivCanvas.parentElement.clientWidth - 24;
+  ivCanvas.width = Math.max(400, containerW);
+  phCanvas.width = Math.max(400, containerW);
+}
+
+// RSJ model: dφ/dt = v (normalized voltage)
+// βc * dv/dt + v + sin(φ) = Ib
+// This gives: dv/dt = (Ib - sin(φ) - v) / βc
+// In matrix form: state = [φ, v]
+function derivatives(phi, v) {
+  const dphi = v;
+  const dv = (Ib - Math.sin(phi) - v) / betaC;
+  return [dphi, dv];
+}
+
+// RK4 step
+function rk4(phi, v, h) {
+  const [k1p, k1v] = derivatives(phi, v);
+  const [k2p, k2v] = derivatives(phi + h/2*k1p, v + h/2*k1v);
+  const [k3p, k3v] = derivatives(phi + h/2*k2p, v + h/2*k2v);
+  const [k4p, k4v] = derivatives(phi + h*k3p, v + h*k3v);
+  const newPhi = phi + (h/6)*(k1p + 2*k2p + 2*k3p + k4p);
+  const newV = v + (h/6)*(k1v + 2*k2v + 2*k3v + k4v);
+  return [newPhi, newV];
+}
+
+let rafId = null;
+let lastTime = 0;
+const SIM_STEPS_PER_FRAME = 20;
+
+function loop(ts) {
+  if (!running) { rafId = requestAnimationFrame(loop); return; }
+
+  // Advance simulation
+  for (let i = 0; i < SIM_STEPS_PER_FRAME; i++) {
+    [phi, dphi] = rk4(phi, dphi, dt);
+    t += dt;
+  }
+
+  // Store data point
+  const v_normalized = dphi; // voltage in normalized units (V*R/Ic → actual V = v * Ic * R)
+  const i_super = Math.sin(phi); // normalized supercurrent
+
+  phaseData.push({ t, phi: phi % (4*Math.PI), v: v_normalized });
+  if (phaseData.length > MAX_PTS) phaseData.shift();
+
+  currentDot = { v: v_normalized, i: Ib };
+
+  // Update UI
+  updateMetrics(v_normalized, i_super);
+  drawIV();
+  drawPhase();
+
+  rafId = requestAnimationFrame(loop);
+}
+
+function updateMetrics(v, iSuper) {
+  // Time-average voltage over recent data
+  const recent = phaseData.slice(-50);
+  const avgV = recent.reduce((s,d) => s+d.v, 0) / recent.length;
+
+  // Josephson frequency: f = (2e/h) * V_actual = V_normalized * (Ic*R) / phi0
+  // In normalized units with Ic=1μA, R=1Ω: V_actual = v_norm * 1e-6 V
+  // f_J = 2e*V/h = V_norm * 1e-6 / phi0 = V_norm * 1e-6 / 2.07e-15 ≈ V_norm * 483 GHz
+  const Ic_actual = 1e-6; // 1 μA
+  const R_actual = 1.0;   // 1 Ω
+  const V_actual = avgV * Ic_actual * R_actual; // in Volts
+  const fJ = Math.abs(V_actual) / phi0; // in Hz
+
+  document.getElementById('avgVoltage').textContent = (V_actual * 1e6).toFixed(3) + ' μV';
+  document.getElementById('avgCurrent').textContent = (Ib * Ic_actual * 1e6).toFixed(3) + ' μA';
+  document.getElementById('freqJ').textContent = (fJ / 1e9).toFixed(2) + ' GHz';
+  document.getElementById('phaseVal').textContent = (phi % (2*Math.PI)).toFixed(3) + ' rad';
+  document.getElementById('superCurrent').textContent = (iSuper * Ic_actual * 1e6).toFixed(3) + ' μA';
+
+  const isDC = Math.abs(Ib) <= 1.001;
+  const modeEl = document.getElementById('modeLabel');
+  if (isDC && Math.abs(avgV) < 0.05) {
+    modeEl.textContent = 'DC Josephson';
+    modeEl.className = 'font-bold text-green-400';
+    updateEffectInfo('dc');
+  } else {
+    modeEl.textContent = 'AC Josephson';
+    modeEl.className = 'font-bold text-yellow-400';
+    updateEffectInfo('ac');
+  }
+}
+
+function updateEffectInfo(mode) {
+  const icon = document.getElementById('effectIcon');
+  const title = document.getElementById('effectTitle');
+  const desc = document.getElementById('effectDesc');
+  if (mode === 'dc') {
+    icon.textContent = '🔵';
+    title.textContent = 'DC Josephson Effect';
+    title.className = 'text-green-400 font-bold text-sm';
+    desc.textContent = 'When I_b < I_c, Cooper pairs tunnel coherently through the barrier with zero voltage. The supercurrent I_s = I_c·sin(φ) flows without resistance. The phase difference φ is static. This is the macroscopic quantum tunneling hallmark of superconductivity.';
+  } else {
+    icon.textContent = '🟡';
+    title.textContent = 'AC Josephson Effect';
+    title.className = 'text-yellow-400 font-bold text-sm';
+    desc.textContent = `When I_b > I_c, a finite voltage V appears across the junction. The phase φ evolves continuously: dφ/dt = (2e/ℏ)V, causing the supercurrent to oscillate at the Josephson frequency f_J = 2eV/h ≈ 484 GHz/mV. This creates microwave radiation — used in quantum voltage standards.`;
+  }
+}
+
+function sweepIV() {
+  ivSweepData = [];
+  // Compute time-averaged IV by running sim at many bias currents
+  const steps = 80;
+  const phi0s = 0, v0s = 0;
+  for (let j = 0; j <= steps; j++) {
+    const ibVal = (j / steps) * 2.0;
+    // Run for transient
+    let p = 0, v = 0;
+    for (let k = 0; k < 500; k++) {
+      const [np, nv] = rk4Param(p, v, dt, ibVal, betaC);
+      p = np; v = nv;
+    }
+    // Average over steady state
+    let vSum = 0;
+    const N = 200;
+    for (let k = 0; k < N; k++) {
+      const [np, nv] = rk4Param(p, v, dt, ibVal, betaC);
+      p = np; v = nv;
+      vSum += nv;
+    }
+    ivSweepData.push({ ib: ibVal, v: vSum / N });
+  }
+}
+
+function rk4Param(phi, v, h, ib, bc) {
+  const d = (phi, v) => [v, (ib - Math.sin(phi) - v) / bc];
+  const [k1p, k1v] = d(phi, v);
+  const [k2p, k2v] = d(phi + h/2*k1p, v + h/2*k1v);
+  const [k3p, k3v] = d(phi + h/2*k2p, v + h/2*k2v);
+  const [k4p, k4v] = d(phi + h*k3p, v + h*k3v);
+  return [phi+(h/6)*(k1p+2*k2p+2*k3p+k4p), v+(h/6)*(k1v+2*k2v+2*k3v+k4v)];
+}
+
+function drawIV() {
+  const canvas = document.getElementById('ivCanvas');
+  const W = canvas.width, H = canvas.height;
+  const ctx = ivCtx;
+  ctx.clearRect(0, 0, W, H);
+
+  // Background
+  ctx.fillStyle = '#111827';
+  ctx.fillRect(0, 0, W, H);
+
+  const pad = { l: 55, r: 20, t: 15, b: 35 };
+  const gW = W - pad.l - pad.r;
+  const gH = H - pad.t - pad.b;
+
+  // Axis ranges: V: -0.1 to 2.5 (normalized), I: -0.1 to 2.1
+  const vMin = -0.1, vMax = 2.5;
+  const iMin = -0.1, iMax = 2.1;
+  const xScale = v => pad.l + (v - vMin) / (vMax - vMin) * gW;
+  const yScale = i => pad.t + gH - (i - iMin) / (iMax - iMin) * gH;
+
+  // Grid
+  ctx.strokeStyle = '#1f2937';
+  ctx.lineWidth = 1;
+  for (let v = 0; v <= 2.5; v += 0.5) {
+    ctx.beginPath(); ctx.moveTo(xScale(v), pad.t); ctx.lineTo(xScale(v), pad.t+gH); ctx.stroke();
+  }
+  for (let i = 0; i <= 2.0; i += 0.5) {
+    ctx.beginPath(); ctx.moveTo(pad.l, yScale(i)); ctx.lineTo(pad.l+gW, yScale(i)); ctx.stroke();
+  }
+
+  // Axes
+  ctx.strokeStyle = '#4b5563'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(pad.l, pad.t); ctx.lineTo(pad.l, pad.t+gH); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(pad.l, yScale(0)); ctx.lineTo(pad.l+gW, yScale(0)); ctx.stroke();
+
+  // Ic marker
+  ctx.strokeStyle = '#374151'; ctx.lineWidth = 1; ctx.setLineDash([3,3]);
+  ctx.beginPath(); ctx.moveTo(pad.l, yScale(1)); ctx.lineTo(pad.l+gW, yScale(1)); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = '#6b7280'; ctx.font = '10px monospace';
+  ctx.fillText('I_c', pad.l - 25, yScale(1) + 4);
+  ctx.beginPath(); ctx.moveTo(xScale(1), pad.t); ctx.lineTo(xScale(1), pad.t+gH);
+  ctx.strokeStyle = '#374151'; ctx.setLineDash([3,3]); ctx.stroke(); ctx.setLineDash([]);
+
+  // Draw IV curve from sweep
+  if (ivSweepData.length > 1) {
+    // DC branch (vertical line at V=0 for I < Ic)
+    ctx.strokeStyle = '#34d399'; ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(xScale(0), yScale(0));
+    ctx.lineTo(xScale(0), yScale(1.0));
+    ctx.stroke();
+
+    // AC branch (Ohmic-like for I > Ic)
+    ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    let started = false;
+    for (const pt of ivSweepData) {
+      if (pt.ib < 1.0) continue;
+      const x = xScale(pt.v), y = yScale(pt.ib);
+      if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+
+  // Current operating point
+  const opV = phaseData.length > 0 ? phaseData[phaseData.length-1].v : 0;
+  const opX = xScale(opV);
+  const opY = yScale(Ib);
+  ctx.fillStyle = '#ef4444';
+  ctx.beginPath(); ctx.arc(opX, opY, 6, 0, 2*Math.PI); ctx.fill();
+  ctx.fillStyle = '#fca5a5'; ctx.font = 'bold 10px sans-serif';
+  ctx.fillText('●', opX + 8, opY - 4);
+
+  // Axis labels
+  ctx.fillStyle = '#9ca3af'; ctx.font = '11px monospace';
+  ctx.fillText('V (normalized I_c·R units)', pad.l + gW/2 - 70, H - 5);
+  ctx.save(); ctx.translate(12, pad.t + gH/2); ctx.rotate(-Math.PI/2);
+  ctx.fillText('I_b / I_c', -30, 0); ctx.restore();
+
+  // Tick labels
+  ctx.fillStyle = '#6b7280'; ctx.font = '9px monospace';
+  for (let v = 0; v <= 2.5; v += 0.5) ctx.fillText(v.toFixed(1), xScale(v) - 8, pad.t + gH + 15);
+  for (let i = 0; i <= 2.0; i += 0.5) ctx.fillText(i.toFixed(1), 5, yScale(i) + 4);
+}
+
+function drawPhase() {
+  const canvas = document.getElementById('phaseCanvas');
+  const W = canvas.width, H = canvas.height;
+  const ctx = phaseCtx;
+  ctx.clearRect(0, 0, W, H);
+
+  ctx.fillStyle = '#111827';
+  ctx.fillRect(0, 0, W, H);
+
+  if (phaseData.length < 2) return;
+
+  const pad = { l: 50, r: 15, t: 15, b: 35 };
+  const gW = W - pad.l - pad.r;
+  const gH = H - pad.t - pad.b;
+
+  // Time range: last MAX_PTS points
+  const tMin = phaseData[0].t;
+  const tMax = phaseData[phaseData.length - 1].t;
+
+  // Phase range: -π to max_phi or wrap to 0..4π
+  const phiData = phaseData.map(d => d.phi);
+  const phiMin = -Math.PI, phiMax = 4 * Math.PI;
+
+  // Voltage range
+  const vData = phaseData.map(d => d.v);
+  const vAbsMax = Math.max(2.0, ...vData.map(Math.abs));
+
+  const xS = t => pad.l + (t - tMin) / Math.max(tMax - tMin, 1) * gW;
+  const yPhiS = phi => pad.t + gH/2 - phi / (phiMax - phiMin) * gH;
+  const yVS = v => pad.t + gH/2 - v / vAbsMax * gH/2;
+
+  // Grid
+  ctx.strokeStyle = '#1f2937'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(pad.l, pad.t+gH/2); ctx.lineTo(pad.l+gW, pad.t+gH/2); ctx.stroke();
+
+  // Draw phase φ(t)
+  ctx.strokeStyle = '#60a5fa'; ctx.lineWidth = 2;
+  ctx.beginPath();
+  phaseData.forEach((d, i) => {
+    const x = xS(d.t), y = yPhiS(d.phi);
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+
+  // Draw voltage V(t)
+  ctx.strokeStyle = '#fb923c'; ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  phaseData.forEach((d, i) => {
+    const x = xS(d.t), y = yVS(d.v);
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+
+  // Axes
+  ctx.strokeStyle = '#4b5563'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(pad.l, pad.t); ctx.lineTo(pad.l, pad.t+gH); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(pad.l, pad.t+gH); ctx.lineTo(pad.l+gW, pad.t+gH); ctx.stroke();
+
+  // Labels
+  ctx.fillStyle = '#9ca3af'; ctx.font = '11px monospace';
+  ctx.fillText('Time (normalized)', pad.l + gW/2 - 50, H - 5);
+  ctx.fillStyle = '#60a5fa'; ctx.font = '10px sans-serif';
+  ctx.fillText('φ(t)', pad.l + 5, pad.t + 15);
+  ctx.fillStyle = '#fb923c';
+  ctx.fillText('V(t)', pad.l + 5, pad.t + 28);
+}
+
+function updateParams() {
+  Ib = parseFloat(document.getElementById('sliderIb').value);
+  betaC = parseFloat(document.getElementById('sliderBeta').value);
+  document.getElementById('valIb').textContent = Ib.toFixed(2);
+  document.getElementById('valBeta').textContent = betaC.toFixed(2);
+  // Recompute IV sweep with new beta
+  sweepIV();
+  // Reset transient
+  phi = 0; dphi = 0; t = 0;
+  phaseData = [];
+}
+
+function toggleRun() {
+  running = !running;
+  document.getElementById('btnRun').textContent = running ? '⏸ Pause' : '▶ Run';
+  document.getElementById('btnRun').className = running
+    ? 'flex-1 bg-blue-700 hover:bg-blue-600 text-white py-2 rounded-lg text-sm font-semibold transition-colors'
+    : 'flex-1 bg-green-700 hover:bg-green-600 text-white py-2 rounded-lg text-sm font-semibold transition-colors';
+}
+
+function resetSim() {
+  phi = 0; dphi = 0; t = 0;
+  phaseData = [];
+  sweepIV();
+}
+
+function clearTraces() {
+  phaseData = [];
+  ivSweepData = [];
+}
+
+window.addEventListener('load', init);
+</script>
+</body>
+</html>
